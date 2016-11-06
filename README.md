@@ -15,7 +15,7 @@ One round follow:
 
 
 How it works - 
-Consider that we have unique hardware register
+Suppose that we have unique hardware register
 where we can direct shift for everyone line or column.
 We can do it parallel.
 
