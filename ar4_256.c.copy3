@@ -1,0 +1,303 @@
+/*
+ * Cipher Algorithm ARC4
+ * by Alexander Postoronca (Alex Lewz)
+
+Date 22/10/2016 
+
+Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+ */
+
+#include <stdlib.h>
+#include <stdio.h>
+#include <getopt.h>
+#include <string.h>
+
+#include "ar4ive.h"
+#include "ar4_256.h"
+#include "debug.h"
+/*
+void
+clean(AR4_UNIT * block, long int fn)
+{
+    R i = BLOCK_SIZE; while(i-- && fn)
+        for (int j = 0; (j < BLOCK_SIZE) && fn; j += 8, fn--)
+           block[i] <<= 8;
+}
+*/
+
+int
+clean(AR4_UNIT * block, AR4_UNIT * mask)
+{
+    R i = BLOCK_SIZE; while(i--)
+    {
+        block[i] = mask[i];
+    }
+    return 1;
+}
+
+void
+copy(AR4_UNIT * block, AR4_UNIT * save)
+{
+    R i = BLOCK_SIZE; while(i--)
+    {
+        save[i] = block[i];
+    }
+}
+
+void
+xor(AR4_UNIT * block, AR4_UNIT * xkey)
+{
+    R i = BLOCK_SIZE; while(i--)
+    {
+        block[i] ^= xkey[i];
+    }
+}
+
+static struct option const long_options[] =
+{
+  {"decrypt",         no_argument,  0, 'd'},
+  {"rounds",    required_argument,  0, 'r'},
+  {"use-iv",    required_argument,  0, 'i'},
+  {"key",       required_argument,  0, 'k'},
+  {"use-internal-iv", no_argument,  0, 'n'},
+  {"version",         no_argument,  0, 'v'},
+  {"help",            no_argument,  0, 'h'},
+  {NULL,        0,              NULL,   0 }
+};
+
+static int uncrypt     = NONE;
+static int rounds      = MIN_ROUNDS;
+static int custom_key  = NONE;
+static int external_iv = NONE;
+static int internal_iv = NONE;
+
+int
+main(int argc, char **argv)
+{
+           R it11      = NONE;
+    long int file_size = NONE;
+    long int fn        = NONE;
+    int opt            = NONE;
+
+    AR4_KEY key; // AR4_KEY *key = calloc(8,BLOCK_SIZE);
+    AR4_KEY subkey;
+
+    AR4_UNIT registru[BLOCK_SIZE]; // Main
+    /* For Input Vector */
+    AR4_UNIT store_iv[BLOCK_SIZE]; // Read/Write
+    AR4_UNIT tmp_save[BLOCK_SIZE]; // Temp
+    AR4_UNIT works_iv[BLOCK_SIZE]; // Link
+    AR4_UNIT unpluggg[BLOCK_SIZE]; // For last block random (clean())
+
+    char key_fine[FILENAME_MAX];
+
+    FILE *fp_message;
+    
+    // dbg_cc += snprintf(dbg_char, 17, "/* DBG START */\n");
+
+    while ((opt = getopt_long (argc, argv, "dr:i:nk:hv", long_options, NULL)) != -1)
+    {
+        switch (opt)
+        {
+            case 'd': uncrypt = ATOM; break;
+
+            case 'r':
+                if(atoi(optarg) > MIN_ROUNDS) rounds = atoi(optarg);
+            break;
+
+            case 'i':
+                    read_iv(optarg, store_iv);
+                    external_iv = ATOM;
+                    internal_iv = NONE;
+            case 'n':
+                    external_iv = NONE;
+                    internal_iv = ATOM;
+            break;
+
+            case 'k':
+                custom_key = ATOM;
+                //fprintf(stdout, "%s\n", optarg);
+                strncpy(key_fine, optarg, strlen(optarg));
+            break;
+
+            case 'v':
+                version();
+                return EXIT_FAILURE;
+            break;
+            case '?':
+                fprintf(stderr, "Error - param not found\n");
+                //return usage();
+            break;
+            
+            case 'h': default: return usage(); break;
+        }
+    }
+/*
+    if(argc <= 1 || optind < argc)
+    {
+        fprintf(stderr, "Expected arguments!\n\n");
+        return usage();
+    }
+*/
+
+    // dbg_cc += snprintf(&dbg_char[dbg_cc], strlen(key_fine)+2, "%s\n", key_fine);
+
+    if( uncrypt && !custom_key)          return usage();
+    if(custom_key) read_key(key_fine, &key, &file_size);
+    if(!uncrypt && !custom_key)      generate_key(&key);
+    if(!uncrypt && internal_iv)   generate_iv(store_iv);
+    if( uncrypt && internal_iv) read_internal_iv(key_fine, store_iv);
+                   if(!uncrypt)   write_key_prime(&key);
+                   if(!uncrypt)   generate_iv(unpluggg);
+
+    // dbg_cc += snprintf(&dbg_char[dbg_cc], 79,
+    //    "mk:     (%016llX:%016llX:%016llX:%016llX)\n",
+    //    key.h[0], key.h[1], key.v[0], key.v[1]);
+
+    sa_box_init(key);
+
+    fp_message = fopen(argv[argc-1], "rb");
+    if(fp_message == NULL)
+    {
+        fprintf(stderr, "Text open - error\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    if(external_iv || internal_iv) /* Cipher Block Chaining */
+    {
+        copy(store_iv, works_iv);
+        // dbg_read_block("\treading:store_iv", store_iv);
+        // dbg_read_block("\treading:works_iv", works_iv);
+
+        while((fn = fread(registru, sizeof(char), UNIT_CHAR, fp_message)))
+        {
+            // dbg_cc += snprintf(&dbg_char[dbg_cc], 20, "\tnew block portion\n");
+            
+            it11 = rounds;
+
+            wave_rotor(&key);
+
+            switch(uncrypt)
+            {
+                case NONE: /* IF ENCRYPT MODE */
+                    // dbg_read_block("\treading:works_iv before registru xor", works_iv);
+                    // dbg_read_block("\treading:registru before xor", registru);
+                    xor(registru, works_iv);
+                    // dbg_read_block("\treading:registru after xor", registru);
+
+                    while(it11--)
+                    {
+                        //dbg_read_block("\treading:registru in rounds cycle", registru);
+                        ar4ive_encrypt(registru, &key);
+                    }
+                    // dbg_read_block("\treading:registru after encrypt", registru);
+
+                    copy(registru, works_iv);
+                    // dbg_read_block("\treading:works_iv after encrypt", works_iv);
+
+                    file_size += fn;
+
+                    fwrite(registru, 1, UNIT_CHAR, stdout);
+                    clean(registru, unpluggg);
+                break;
+                    
+                case ATOM: /* IF DECRYPT MODE */
+                    copy(registru, tmp_save);
+                    //dbg_read_block("\treading:tmp_save", tmp_save);
+                    while(it11--)
+                    {
+                        //dbg_read_block("\treading:registru in rounds cycle", registru);
+                        ar4ive_decrypt(registru, &key);
+                    }
+                    //dbg_read_block("\treading:works_iv", works_iv);
+                    xor(registru, works_iv);
+
+                    copy(tmp_save, works_iv);
+
+                    file_size -= fn;
+                    if(file_size < 0)
+                        fwrite(registru, 1, UNIT_CHAR + (file_size), stdout);
+                    else
+                        fwrite(registru, 1, UNIT_CHAR, stdout);
+                break;
+            }
+        }
+    }
+    else /* Electronic Code Book */
+    {
+        while((fn = fread(registru, sizeof(char), UNIT_CHAR, fp_message)))
+        {
+            it11 = rounds;
+            wave_rotor(&key);
+
+            // dbg_cc += snprintf(&dbg_char[dbg_cc], 79,
+            //    "  bk:   (%016llX:%016llX:%016llX:%016llX)\n",
+            //    key.h[0], key.h[1], key.v[0], key.v[1]);
+            
+            //subkey = key;
+
+            switch(uncrypt)
+            {
+                case ATOM: /* IF DECRYPT MODE */
+                    //dbg_cc += snprintf(&dbg_char[dbg_cc], 14, "DECRYPT MODE\n");
+
+                    while(it11--)
+                    {
+                        //subrotor_minus(&subkey);
+
+                        /*dbg_cc += snprintf(&dbg_char[dbg_cc], 79,
+                            "    sk: (%016llX:%016llX:%016llX:%016llX)\n",
+                            subkey.h[0], subkey.h[1], subkey.v[0], subkey.v[1]);
+            */
+                        ar4ive_decrypt(registru, &key);
+                    }
+                    file_size -= fn;
+
+                    if(file_size < 0)
+                        fwrite(registru, 1, UNIT_CHAR + (file_size), stdout);
+                    else
+                        fwrite(registru, 1, UNIT_CHAR, stdout);
+                break;
+
+                case NONE: /* IF ENCRYPT MODE */
+                    //dbg_cc += snprintf(&dbg_char[dbg_cc], 14, "ENCRYPT MODE\n");
+                    while(it11--)
+                    {
+                        //subrotor_plus(&subkey);
+/*
+                        dbg_cc += snprintf(&dbg_char[dbg_cc], 79,
+                            "    sk: (%016llX:%016llX:%016llX:%016llX)\n",
+                            subkey.h[0], subkey.h[1], subkey.v[0], subkey.v[1]);
+ */           
+                        //subrotor(&subkey);
+                        ar4ive_encrypt(registru, &key);
+                    }
+                    file_size += fn;
+
+                    fwrite(registru, 1, UNIT_CHAR, stdout);
+
+                    clean(registru,unpluggg);
+                break;
+            }
+        }
+    }
+    //fprintf(stdout, "bytes read: %ld\n", file_size);
+    if(!uncrypt)
+    {
+        write_key_size(&file_size);
+        if(internal_iv) write_key_iv(store_iv);
+    }
+
+    fflush(stdout);
+    fflush(stderr);
+
+    fclose(fp_message);
+
+    // dbg_out();
+
+    return EXIT_SUCCESS;
+}
