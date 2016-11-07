@@ -74,7 +74,7 @@ main(int argc, char **argv)
     int opt            = NONE;
 
     AR4_KEY key; // AR4_KEY *key = calloc(8,BLOCK_SIZE);
-    AR4_KEY subkey;
+    //AR4_KEY subkey;
 
     AR4_UNIT registru[BLOCK_SIZE]; // Main
     AR4_UNIT unpluggg[BLOCK_SIZE]; // For random fill block (clean())
@@ -126,7 +126,7 @@ main(int argc, char **argv)
         }
     }
 
-    if(!strcmp(argv[0], argv[argc-1])) return usage();
+    if(!strcmp(argv[0], argv[argc-1]))   return usage();
 
     if( uncrypt && !custom_key)          return usage();
     if(custom_key) read_key(key_fine, &key, &file_size);
